@@ -181,7 +181,8 @@ export function createDaemonPtyEnvironment(opts: PtySubprocessOptions): Record<s
     ...mergeGitConfigEnvProtocol(inheritedEnv, opts.env),
     TERM: 'xterm-256color',
     COLORTERM: 'truecolor',
-    TERM_PROGRAM: 'Orca',
+    TERM_PROGRAM:
+      opts.env?.ORCA_AGENT_TEAMS_PROTOCOL === 'it2' ? (opts.env.TERM_PROGRAM ?? 'Orca') : 'Orca',
     TERM_PROGRAM_VERSION: process.env.ORCA_APP_VERSION ?? '0.0.0-dev',
     FORCE_HYPERLINK: '1',
     [ORCA_IMAGE_PROTOCOL_ENV]: ORCA_IMAGE_PROTOCOL_VALUE

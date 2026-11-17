@@ -9,6 +9,7 @@ import {
 } from '../../pty/shell-startup/shell-templates'
 import type { ShellWrapperFile } from '../../pty/shell-startup/shell-wrapper-file-writer'
 import {
+  buildIt2ZshStartupFile,
   buildZshStartupHook,
   type ZshStartupHookSpec
 } from '../../pty/shell-startup/zsh-startup-wrapper-builder'
@@ -24,7 +25,10 @@ export function getLocalShellReadyWrapperPaths(root: string): readonly string[] 
     `${zshDir}/${ZSH_WRAPPER_DIR_MARKER_FILE}`,
     `${root}/bash/rcfile`,
     getFishVendorConfSnippetPath(root),
-    `${root}/sh/env`
+    `${root}/sh/env`,
+    ...['.zshenv', '.zprofile', '.zshrc', '.zlogin', ZSH_WRAPPER_DIR_MARKER_FILE].map(
+      (name) => `${zshDir}/it2/${name}`
+    )
   ]
 }
 
@@ -56,6 +60,11 @@ export function buildLocalShellReadyWrapperFiles(root: string): readonly ShellWr
     [bashRcfilePath, getBashShellReadyRcfileContent()],
     buildFishVendorConfWrapperFile(root),
     // Only a WSL bridge sh/dash/ash pane points ENV here.
-    [shEnvPath, SH_WSL_ENV_FILE]
+    [shEnvPath, SH_WSL_ENV_FILE],
+    ...['.zshenv', '.zprofile', '.zshrc', '.zlogin'].map((name): ShellWrapperFile => [
+      `${root}/zsh/it2/${name}`,
+      buildIt2ZshStartupFile(name)
+    ]),
+    [`${root}/zsh/it2/${ZSH_WRAPPER_DIR_MARKER_FILE}`, ZSH_WRAPPER_DIR_MARKER_CONTENT]
   ]
 }

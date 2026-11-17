@@ -63,9 +63,9 @@ export async function main(
     process.stdout.write(`${version}\n`)
     return
   }
-  if (argv[0] === 'agent-teams-tmux') {
-    configureExecutable?.(['agent-teams-tmux'])
-    await runAgentTeamsTmuxShim(argv.slice(1))
+  if (argv[0] === 'agent-teams-tmux' || argv[0] === 'agent-teams-it2') {
+    configureExecutable?.([argv[0]])
+    await runAgentTeamsShim(argv[0] === 'agent-teams-it2' ? 'it2' : 'tmux', argv.slice(1))
     return
   }
   if (argv[0] === 'claude-teams') {
@@ -247,7 +247,18 @@ async function runClaudeTeams(argv: string[], cwd: string): Promise<void> {
   }
 }
 
-async function runAgentTeamsTmuxShim(argv: string[]): Promise<void> {
+function resolveAgentTeamsEnvPane(protocol: 'tmux' | 'it2'): string | undefined {
+  if (protocol === 'tmux') {
+    return process.env.TMUX_PANE ?? process.env.ORCA_AGENT_TEAMS_LEADER_PANE
+  }
+  const sessionId = process.env.ITERM_SESSION_ID
+  const separator = sessionId?.indexOf(':') ?? -1
+  return separator >= 0
+    ? sessionId?.slice(separator + 1) || process.env.ORCA_AGENT_TEAMS_LEADER_PANE
+    : process.env.ORCA_AGENT_TEAMS_LEADER_PANE
+}
+
+async function runAgentTeamsShim(protocol: 'tmux' | 'it2', argv: string[]): Promise<void> {
   try {
     const client = new (await loadRuntimeClientClass())(undefined, 10_000)
     const response = await client.call<{
@@ -257,9 +268,10 @@ async function runAgentTeamsTmuxShim(argv: string[]): Promise<void> {
       {
         teamId: process.env.ORCA_AGENT_TEAMS_TEAM_ID,
         token: process.env.ORCA_AGENT_TEAMS_TOKEN,
-        envPane: process.env.TMUX_PANE,
+        envPane: resolveAgentTeamsEnvPane(protocol),
         cwd: process.cwd(),
-        argv
+        argv,
+        protocol
       },
       { timeoutMs: 10_000 }
     )
@@ -267,7 +279,7 @@ async function runAgentTeamsTmuxShim(argv: string[]): Promise<void> {
     process.stderr.write(response.result.tmux.stderr)
     process.exitCode = response.result.tmux.exitCode
   } catch (error) {
-    reportCliError(error, false, { commandPath: ['agent-teams-tmux'] })
+    reportCliError(error, false, { commandPath: [`agent-teams-${protocol}`] })
     process.exitCode = 1
   }
 }

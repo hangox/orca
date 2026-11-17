@@ -1,3 +1,4 @@
+/* oxlint-disable max-lines */
 import * as z from 'zod'
 import { TERMINAL_KITTY_FILE_MAX_BYTES } from '../../terminal/images/terminal-kitty-file'
 import { OptionalFiniteNumber, OptionalString, requiredString } from '../rpc-param-primitives'
@@ -271,7 +272,6 @@ export const TerminalCreateParams = z.object({
     })
     .optional(),
   resumeProviderSession: ResumeProviderSessionParam.optional(),
-  // Older hosts drop it and resume as before.
   resumeOrigin: z.literal('saved').optional(),
   launchToken: OptionalString,
   trustWorktreeId: z.string().min(1).max(32_768).optional(),
@@ -282,7 +282,6 @@ export const TerminalCreateParams = z.object({
   terminalViewAttributes: z.unknown().optional(),
   title: OptionalString,
   focus: z.unknown().optional(),
-  // Ignored here; the CLI still sends it for hosts before v1.4.211, which route on it.
   rendererBacked: z.unknown().optional(),
   activate: z.unknown().optional(),
   presentation: z.enum(['background', 'focused']).optional(),
@@ -346,17 +345,17 @@ export const TerminalStopExact = TerminalStop.extend({
   keepHistory: z.boolean().optional(),
   targetOnly: z.boolean().optional()
 })
-
 export const AgentTeamsTmuxCompat = z.object({
   teamId: requiredString('Missing agent team ID'),
   token: requiredString('Missing agent team token'),
   envPane: requiredString('Missing tmux pane identity'),
   cwd: OptionalString,
-  argv: z.array(z.string())
+  argv: z.array(z.string()),
+  protocol: z.enum(['tmux', 'it2']).optional()
 })
-
 export const AgentTeamsPrepareLaunch = z.object({
   paneKey: requiredString('Missing pane key'),
   env: z.record(z.string(), z.string()).optional(),
-  prepareAuth: z.boolean().optional()
+  prepareAuth: z.boolean().optional(),
+  mode: z.enum(['off', 'in-process', 'native-panes-shim', 'it2']).optional()
 })

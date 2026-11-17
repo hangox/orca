@@ -20,11 +20,12 @@ export function terminalCreateTeamAllocation(teams: ClaudeAgentTeamsService) {
       release()
       return buildRuntimeAgentTeamsLaunchPlan({
         ...args,
-        createTeamEnv: (shimDir, shimBin) => {
+        createTeamEnv: (shimDir, shimBin, mode) => {
           const allocation = teams.createLaunchEnv({
             leaderHandle,
             baseEnv: args.baseEnv,
             shimDir,
+            mode,
             shimBin
           })
           teamId = allocation.teamId

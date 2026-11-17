@@ -17,7 +17,7 @@ import { getBundledLauncherPath } from '../../../cli/packaged-assets/bundled-cli
 import { resolvePathEnvKey } from '../../../pty/environment/windows-path-segment-merge'
 
 export type ClaudeAgentTeamsLaunchPlan = {
-  command: string
+  command?: string
   env: Record<string, string>
   envToDelete?: string[]
 }
@@ -25,8 +25,10 @@ export type ClaudeAgentTeamsLaunchPlan = {
 export async function ensureClaudeAgentTeamsShimDir(root = defaultShimRoot()): Promise<string> {
   await mkdir(root, { recursive: true })
   await writeIfChanged(join(root, 'tmux'), unixShimScript())
+  await writeIfChanged(join(root, 'it2'), unixIt2ShimScript())
   if (process.platform === 'win32') {
     await writeIfChanged(join(root, 'tmux.cmd'), windowsClaudeAgentTeamsShimScript())
+    await writeIfChanged(join(root, 'it2.cmd'), windowsClaudeAgentTeamsIt2ShimScript())
   }
   return root
 }
@@ -35,13 +37,27 @@ export async function buildClaudeAgentTeamsLaunchPlan(args: {
   command: string | undefined
   mode: ClaudeAgentTeamsMode | undefined
   baseEnv: Record<string, string | undefined>
-  createTeamEnv: (shimDir: string, shimBin: string) => Record<string, string>
+  createTeamEnv: (
+    shimDir: string,
+    shimBin: string,
+    mode: 'native-panes-shim' | 'it2'
+  ) => Record<string, string>
 }): Promise<ClaudeAgentTeamsLaunchPlan | null> {
   const mode = args.mode ?? 'off'
-  if (!args.command || mode === 'off' || !isDirectClaudeCommand(args.command)) {
+  const directClaude = !!args.command && isDirectClaudeCommand(args.command)
+  if (
+    mode === 'off' ||
+    (args.command && !directClaude && (mode !== 'it2' || process.platform === 'win32'))
+  ) {
+    return null
+  }
+  if (!args.command && mode !== 'it2') {
     return null
   }
   if (mode === 'in-process' || process.platform === 'win32') {
+    if (!args.command) {
+      return null
+    }
     return {
       command: addClaudeTeammateModeInProcess(args.command),
       env: { CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1' }
@@ -49,18 +65,25 @@ export async function buildClaudeAgentTeamsLaunchPlan(args: {
   }
   const shimBin = resolveClaudeAgentTeamsShimBin(args.baseEnv)
   if (!shimBin) {
+    if (mode === 'it2') {
+      throw new Error('claude_agent_teams_it2_shim_unavailable')
+    }
     // Refuse cwd-relative CLI resolution when no absolute binary can be found.
+    if (!args.command) {
+      return null
+    }
     return {
       command: addClaudeTeammateModeInProcess(args.command),
       env: { CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1' }
     }
   }
   const shimDir = await ensureClaudeAgentTeamsShimDir()
-  const env = args.createTeamEnv(shimDir, shimBin)
+  const useIt2 = mode === 'it2'
+  const env = args.createTeamEnv(shimDir, shimBin, useIt2 ? 'it2' : 'native-panes-shim')
   return {
-    command: addClaudeTeammateModeAuto(args.command),
+    command: directClaude && args.command ? addClaudeTeammateModeAuto(args.command) : args.command,
     env,
-    envToDelete: ['TERM_PROGRAM']
+    envToDelete: useIt2 ? ['TMUX', 'TMUX_PANE'] : ['TERM_PROGRAM']
   }
 }
 
@@ -133,6 +156,14 @@ function isExecutableFile(candidate: string): boolean {
 
 // Require an absolute CLI: cmd.exe and POSIX dot/empty PATH entries can execute a cwd-planted orca with the team token.
 function unixShimScript(): string {
+  return unixAgentTeamsShimScript('tmux', 'agent-teams-tmux')
+}
+
+function unixIt2ShimScript(): string {
+  return unixAgentTeamsShimScript('it2', 'agent-teams-it2')
+}
+
+function unixAgentTeamsShimScript(name: string, command: string): string {
   return [
     '#!/usr/bin/env sh',
     'set -eu',
@@ -140,16 +171,24 @@ function unixShimScript(): string {
     'case $orca_bin in',
     '  /*|[A-Za-z]:[\\\\/]*) ;;',
     '  *)',
-    '    echo "orca agent-teams tmux shim: ORCA_AGENT_TEAMS_SHIM_BIN must be an absolute path" >&2',
+    `    echo "orca agent-teams ${name} shim: ORCA_AGENT_TEAMS_SHIM_BIN must be an absolute path" >&2`,
     '    exit 127',
     '    ;;',
     'esac',
-    'exec "$orca_bin" agent-teams-tmux "$@"',
+    `exec "$orca_bin" ${command} "$@"`,
     ''
   ].join('\n')
 }
 
 export function windowsClaudeAgentTeamsShimScript(): string {
+  return windowsAgentTeamsShimScript('tmux', 'agent-teams-tmux')
+}
+
+function windowsClaudeAgentTeamsIt2ShimScript(): string {
+  return windowsAgentTeamsShimScript('it2', 'agent-teams-it2')
+}
+
+function windowsAgentTeamsShimScript(name: string, command: string): string {
   return [
     '@echo off',
     'setlocal',
@@ -159,11 +198,11 @@ export function windowsClaudeAgentTeamsShimScript(): string {
     'if "%ORCA_SHIM_BIN:~0,2%"=="\\\\" goto :run',
     'goto :unqualified',
     ':run',
-    // call would percent-expand tmux pane ids such as %2 again.
-    '"%ORCA_SHIM_BIN%" agent-teams-tmux %*',
+    // call would percent-expand pane ids such as %2 again.
+    `"%ORCA_SHIM_BIN%" ${command} %*`,
     'exit /b %ERRORLEVEL%',
     ':unqualified',
-    'echo orca agent-teams tmux shim: ORCA_AGENT_TEAMS_SHIM_BIN must be an absolute path 1>&2',
+    `echo orca agent-teams ${name} shim: ORCA_AGENT_TEAMS_SHIM_BIN must be an absolute path 1>&2`,
     'exit /b 127',
     ''
   ].join('\r\n')

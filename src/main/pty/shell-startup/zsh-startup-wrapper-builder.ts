@@ -41,13 +41,31 @@ export type ZshStartupHookSpec = {
 }
 
 const AGENT_TEAMS_PATH_RESTORE_BLOCK = `__orca_restore_agent_teams_path() {
+  builtin emulate -L zsh
   [[ -n "\${ORCA_AGENT_TEAMS_SHIM_DIR:-}" ]] || return 0
-  case "$PATH" in
-    "\${ORCA_AGENT_TEAMS_SHIM_DIR}"|"\${ORCA_AGENT_TEAMS_SHIM_DIR}:"*) return 0 ;;
-  esac
-  export PATH="\${ORCA_AGENT_TEAMS_SHIM_DIR}:$PATH"
+  local -a _orca_path
+  local _orca_path_entry
+  for _orca_path_entry in "\${path[@]}"; do
+    [[ "$_orca_path_entry" == "$ORCA_AGENT_TEAMS_SHIM_DIR" ]] || _orca_path+=("$_orca_path_entry")
+  done
+  path=("$ORCA_AGENT_TEAMS_SHIM_DIR" "\${_orca_path[@]}")
+  builtin export PATH
 }
 __orca_restore_agent_teams_path`
+
+export function buildIt2ZshStartupFile(fileName: string): string {
+  return `if [[ -n "\${ORCA_IT2_USER_ZDOTDIR:-}" && ! -f "$ORCA_IT2_USER_ZDOTDIR/.orca-shell-wrapper" ]]; then
+  builtin export ZDOTDIR="$ORCA_IT2_USER_ZDOTDIR"
+else
+  builtin unset ZDOTDIR
+fi
+[[ ! -r "\${ZDOTDIR-$HOME}/${fileName}" ]] || builtin source -- "\${ZDOTDIR-$HOME}/${fileName}"
+builtin export ORCA_IT2_USER_ZDOTDIR="\${ZDOTDIR:-}"
+builtin export ZDOTDIR="\${ORCA_IT2_ZDOTDIR}"
+${AGENT_TEAMS_PATH_RESTORE_BLOCK}
+builtin unfunction __orca_restore_agent_teams_path
+`
+}
 
 const OPENCODE_CONFIG_DIR_RESTORE = `[[ -n "\${ORCA_OPENCODE_CONFIG_DIR:-}" ]] && export OPENCODE_CONFIG_DIR="\${ORCA_OPENCODE_CONFIG_DIR}"`
 const MIMOCODE_CONFIG_DIR_RESTORE = `[[ -n "\${ORCA_MIMOCODE_CONFIG_DIR:-}" ]] && export MIMOCODE_CONFIG_DIR="\${ORCA_MIMOCODE_CONFIG_DIR}"`
@@ -138,6 +156,14 @@ ${permanentPrecmd}
     __orca_cwd_report
   fi
 ${joinBlocks([
+  spec.restores.agentTeamsPath
+    ? `  if [[ "\${ORCA_AGENT_TEAMS_PROTOCOL:-}" == it2 && -n "\${ORCA_AGENT_TEAMS_SHIM_DIR:-}" ]]; then
+    builtin export ORCA_IT2_USER_ZDOTDIR="\${ZDOTDIR:-}"
+    builtin export ORCA_IT2_ZDOTDIR="$_orca_it2_zdotdir"
+    builtin export ZDOTDIR="$ORCA_IT2_ZDOTDIR"
+  fi
+  builtin unset _orca_it2_zdotdir`
+    : null,
   spec.restores.managedWslCli ? indentBlock(WSL_MANAGED_CLI_PATH_RESTORE, '  ') : null,
   indentBlock(ORCA_CLI_POSIX_PATH_RESTORE, '  ').replace(/\n$/, ''),
   featureGuard('overlay', getOverlayRestoreBlocks(spec)),
@@ -165,6 +191,7 @@ ${ZSH_DEFERRED_LINE_INIT_CLEANUP_BLOCK}
 export function buildZshStartupHook(spec: ZshStartupHookSpec): string {
   return `${joinBlocks([
     `# ${spec.headerLabel}`,
+    spec.restores.agentTeamsPath ? 'builtin typeset -g _orca_it2_zdotdir="${ZDOTDIR}/it2"' : null,
     ZSH_ZDOTDIR_HANDBACK_BLOCK,
     ZSH_FEATURE_CHANNEL_BLOCK,
     SHELL_STARTUP_IDENTITY_MARKER_BLOCK,

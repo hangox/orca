@@ -54,14 +54,30 @@ export async function assemblePtyIpcSpawnEnv(ctx: PtyIpcSpawnState): Promise<voi
       : null
   ctx.stablePaneKey = verifiedPaneKey ?? ctx.migrationUnsupportedPaneKey ?? ctx.metadataPaneKey
   ctx.baseEnv = baseEnvWithAuth ? { ...baseEnvWithAuth } : undefined
+  let agentTeamsProtocol =
+    (baseEnvWithAuth?.ORCA_AGENT_TEAMS_PROTOCOL ??
+      args.launchConfig?.agentEnv.ORCA_AGENT_TEAMS_PROTOCOL) === 'it2'
+      ? 'it2'
+      : 'tmux'
+  const teamEnv = { ...args.launchConfig?.agentEnv, ...baseEnvWithAuth }
+  const hasAgentTeam = Boolean(teamEnv.ORCA_AGENT_TEAMS_TEAM_ID)
+  const liveAgentTeam = hasAgentTeam && Boolean(ctx.deps.runtime?.isLiveClaudeAgentTeam(teamEnv))
+  const staleIt2 = hasAgentTeam && !liveAgentTeam && agentTeamsProtocol === 'it2'
+  const autoIt2 =
+    process.platform === 'darwin' &&
+    !args.connectionId &&
+    (ctx.deps.getSettings?.() ?? ctx.deps.store?.getSettings())?.claudeAgentTeamsMode === 'it2'
   const shouldRefreshAgentTeamsEnv =
     !ctx.preAdoptedStablePane &&
+    !liveAgentTeam &&
     ctx.deps.runtime !== undefined &&
     ctx.stablePaneKey !== null &&
-    shouldRefreshNativeClaudeAgentTeamsEnv({
-      command: args.command,
-      launchConfig: args.launchConfig
-    })
+    (autoIt2 ||
+      staleIt2 ||
+      shouldRefreshNativeClaudeAgentTeamsEnv({
+        command: args.command,
+        launchConfig: args.launchConfig
+      }))
   ctx.effectiveLaunchConfig = args.launchConfig
   const shouldPreAllocateTerminalHandle =
     ctx.deps.runtime !== undefined &&
@@ -78,8 +94,10 @@ export async function assemblePtyIpcSpawnEnv(ctx: PtyIpcSpawnState): Promise<voi
     // Agent Teams tokens are process-local; regenerate them for the new leader PTY.
     const prepared = await runtime.prepareClaudeAgentTeamsLeaderForHandle({
       handle: ctx.preAllocatedHandle,
-      baseEnv: ctx.baseEnv ?? {}
+      baseEnv: ctx.baseEnv ?? {},
+      ...(autoIt2 || staleIt2 ? { mode: 'it2' as const } : {})
     })
+    agentTeamsProtocol = prepared.env.ORCA_AGENT_TEAMS_PROTOCOL === 'it2' ? 'it2' : 'tmux'
     ctx.agentTeamsLeaderHandle = ctx.preAllocatedHandle
     ctx.baseEnv = {
       ...ctx.baseEnv,
@@ -98,7 +116,12 @@ export async function assemblePtyIpcSpawnEnv(ctx: PtyIpcSpawnState): Promise<voi
   ctx.requestedAgentTeamsPath = ctx.baseEnv?.ORCA_AGENT_TEAMS_TEAM_ID
     ? ctx.baseEnv[resolvePathEnvKey(ctx.baseEnv, process.platform)]
     : undefined
-  ctx.agentTeamsEnvToDelete = shouldRefreshAgentTeamsEnv ? ['TERM_PROGRAM'] : undefined
+  ctx.agentTeamsEnvToDelete =
+    shouldRefreshAgentTeamsEnv || (hasAgentTeam && agentTeamsProtocol === 'it2')
+      ? agentTeamsProtocol === 'it2'
+        ? ['TMUX', 'TMUX_PANE']
+        : ['TERM_PROGRAM']
+      : undefined
   stampPtySpawnPaneEnv(ctx.baseEnv, {
     // Renderer keys select bookkeeping, while environment identity must name this spawn's actual pane.
     pane: ctx.stablePaneKey

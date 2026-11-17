@@ -2,6 +2,7 @@ import type { RuntimePtyController } from '../lifecycle/runtime-pty-controller-c
 import {
   addClaudeTeammateModeAuto,
   addClaudeTeammateModeInProcess,
+  isDirectClaudeCommand,
   type ClaudeAgentTeamsMode
 } from '../../../../shared/agent-launch/startup/claude-agent-teams-tmux-compat'
 import type { TerminalCreateOptions } from './terminal-create-options'
@@ -14,11 +15,16 @@ export async function buildRuntimeAgentTeamsLaunchPlan(args: {
   claudeAgentTeamsSourceCommand?: string
   claudeAgentTeamsMode?: ClaudeAgentTeamsMode
   baseEnv: Record<string, string | undefined>
+  preserveExistingTeam?: boolean
   adoptedBeforeLaunch:
     | boolean
     | Awaited<ReturnType<NonNullable<RuntimePtyController['adoptStablePane']>>>
     | undefined
-  createTeamEnv: (shimDir: string, shimBin: string) => Record<string, string>
+  createTeamEnv: (
+    shimDir: string,
+    shimBin: string,
+    mode: 'native-panes-shim' | 'it2'
+  ) => Record<string, string>
 }): Promise<{
   plan: Awaited<ReturnType<typeof buildClaudeAgentTeamsLaunchPlan>> | undefined
   sequencedStartupCommand?: string
@@ -31,14 +37,15 @@ export async function buildRuntimeAgentTeamsLaunchPlan(args: {
     sourceCommand,
     args.claudeAgentTeamsMode
   )
-  const plan = args.adoptedBeforeLaunch
-    ? undefined
-    : await buildClaudeAgentTeamsLaunchPlan({
-        command: sourceCommand,
-        mode,
-        baseEnv: args.baseEnv,
-        createTeamEnv: args.createTeamEnv
-      })
+  const plan =
+    args.adoptedBeforeLaunch || args.preserveExistingTeam
+      ? undefined
+      : await buildClaudeAgentTeamsLaunchPlan({
+          command: sourceCommand,
+          mode,
+          baseEnv: args.baseEnv,
+          createTeamEnv: args.createTeamEnv
+        })
   const sequencedStartupCommand =
     plan && sourceCommand && args.command && sourceCommand !== args.command
       ? plan.command
@@ -48,9 +55,11 @@ export async function buildRuntimeAgentTeamsLaunchPlan(args: {
       ? {
           ...args.launchConfig,
           agentCommand: args.launchConfig.agentCommand
-            ? mode === 'in-process' || process.platform === 'win32'
-              ? addClaudeTeammateModeInProcess(args.launchConfig.agentCommand)
-              : addClaudeTeammateModeAuto(args.launchConfig.agentCommand)
+            ? mode === 'it2' && !isDirectClaudeCommand(args.launchConfig.agentCommand)
+              ? args.launchConfig.agentCommand
+              : mode === 'in-process' || process.platform === 'win32'
+                ? addClaudeTeammateModeInProcess(args.launchConfig.agentCommand)
+                : addClaudeTeammateModeAuto(args.launchConfig.agentCommand)
             : plan.command,
           agentEnv: { ...args.launchConfig.agentEnv, ...plan.env }
         }

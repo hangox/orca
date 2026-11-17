@@ -21,6 +21,7 @@ const REJECTED_SPLIT_PTY_STOP_TIMEOUT_MS = 2_000
 export type TerminalSplitOptions = {
   direction?: 'horizontal' | 'vertical'
   command?: string
+  cwd?: string
   env?: Record<string, string>
   envToDelete?: string[]
   activate?: boolean
@@ -73,7 +74,7 @@ export abstract class OrcaRuntimeWithSplitPtyBackedTerminal extends OrcaRuntimeW
     const splitArgs: Parameters<typeof spawnInAdmittedPane>[2] = {
       // Why unmeasured: a new split pane has no size of its own until the window lays it out.
       ...UNMEASURED_PTY_SIZE,
-      cwd: workspace.path,
+      cwd: opts.cwd ?? workspace.path,
       command: opts.command,
       commandDelivery: 'provider',
       env: this.buildTerminalWorkspaceEnv(

@@ -42,7 +42,7 @@ export function WorktreeJumpPaletteSurface({
         'Search chats, terminals, workspaces, tasks, settings, and actions'
       )}
       surface="palette"
-      contentClassName="top-[min(10%,4rem)] w-[900px] max-w-[96vw] max-h-[min(90vh,calc(100vh-1.5rem))] overflow-hidden"
+      contentClassName="worktree-jump-palette-surface top-[min(10%,4rem)] w-[900px] max-w-[96vw] max-h-[min(90vh,calc(100vh-1.5rem))] overflow-hidden"
       commandProps={{
         loop: true,
         value: controller.commandSelectedItemId,
@@ -151,7 +151,7 @@ export function WorktreeJumpPaletteSurface({
           onRetry={controller.retryTaskSearch}
         />
       </CommandList>
-      <div className="flex items-center justify-end border-t border-border/60 px-3.5 py-2.5 text-[11px] text-muted-foreground/82">
+      <div className="worktree-jump-palette-footer flex items-center justify-end border-t border-border/60 px-3.5 py-2.5 text-[11px] text-muted-foreground/82">
         <div className="flex items-center gap-2">
           {selectedTask ? (
             <>

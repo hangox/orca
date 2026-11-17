@@ -62,6 +62,7 @@ describe('orca claude-teams CLI handler', () => {
   })
 
   afterEach(() => {
+    vi.unstubAllEnvs()
     if (previousRunAsNode === undefined) {
       delete process.env.ELECTRON_RUN_AS_NODE
     } else {
@@ -73,6 +74,30 @@ describe('orca claude-teams CLI handler', () => {
       process.env.ORCA_PANE_KEY = previousPaneKey
     }
     process.exitCode = previousExitCode
+  })
+
+  it.skipIf(process.platform === 'win32')('启动 it2 时删除继承的 tmux 环境', async () => {
+    vi.stubEnv('TMUX', '/real/tmux')
+    vi.stubEnv('TMUX_PANE', '%9')
+    callMock.mockResolvedValue({
+      result: {
+        launch: {
+          env: { ORCA_AGENT_TEAMS_PROTOCOL: 'it2', TERM_PROGRAM: 'iTerm.app' },
+          envToDelete: ['TMUX', 'TMUX_PANE']
+        }
+      }
+    })
+    await CORE_HANDLERS['claude-teams']({
+      flags: new Map(),
+      client,
+      cwd: '/tmp',
+      json: true,
+      rawArgs: []
+    })
+    const options = spawnMock.mock.calls[0][2]
+    expect(options.env.TMUX).toBeUndefined()
+    expect(options.env.TMUX_PANE).toBeUndefined()
+    expect(options.env.TERM_PROGRAM).toBe('iTerm.app')
   })
 
   // #32177: an empty --data-root must never fall back to the default profile's lock.

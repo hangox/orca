@@ -1,4 +1,5 @@
 import type { TerminalIdentityReadContext } from '../query/terminal-identity-read-context'
+import type { ClaudeAgentTeamsMode } from '../../../../shared/agent-launch/startup/claude-agent-teams-tmux-compat'
 import { OrcaRuntimeWithSplitPaneInMain } from './terminal-split-in-main'
 import { resolveTerminalSessionWorktreeId } from '../../workspaces/catalog/runtime-worktree-path-identity'
 import { makePaneKey } from '../../../../shared/workspace-layout/stable-pane-id'
@@ -137,11 +138,16 @@ export abstract class OrcaRuntimeWithResolveTerminalSplitSourceAuthority extends
     })
   }
 
+  isLiveClaudeAgentTeam(env: Record<string, string | undefined>): boolean {
+    return this.claudeAgentTeams.isLiveTeam(env, this.handleByPtyId, this.ptysById)
+  }
+
   async prepareClaudeAgentTeamsLeader(args: {
     paneKey: string
     baseEnv?: Record<string, string>
     prepareAuth?: boolean
-  }): Promise<{ env: Record<string, string> }> {
+    mode?: ClaudeAgentTeamsMode
+  }): Promise<{ env: Record<string, string>; envToDelete?: string[] }> {
     const handle = this.getTerminalHandleForPaneKey(args.paneKey)
     if (!handle) {
       throw new Error('claude_agent_teams_requires_orca_terminal')
@@ -149,7 +155,8 @@ export abstract class OrcaRuntimeWithResolveTerminalSplitSourceAuthority extends
     return await this.prepareClaudeAgentTeamsLeaderForHandle({
       handle,
       baseEnv: args.baseEnv,
-      prepareAuth: args.prepareAuth
+      prepareAuth: args.prepareAuth,
+      mode: args.mode
     })
   }
 
@@ -157,6 +164,7 @@ export abstract class OrcaRuntimeWithResolveTerminalSplitSourceAuthority extends
     handle: string
     baseEnv?: Record<string, string>
     prepareAuth?: boolean
+    mode?: ClaudeAgentTeamsMode
   }): Promise<{ env: Record<string, string>; envToDelete?: string[] }> {
     const baseEnv = {
       ...process.env,
@@ -168,14 +176,23 @@ export abstract class OrcaRuntimeWithResolveTerminalSplitSourceAuthority extends
     }
     const shimDir = await ensureClaudeAgentTeamsShimDir()
     const shimBin = resolveClaudeAgentTeamsShimBin(baseEnv)
+    const mode =
+      args.mode ??
+      this.store?.getSettings?.().claudeAgentTeamsMode ??
+      (baseEnv.ORCA_AGENT_TEAMS_PROTOCOL === 'it2' ? 'it2' : 'native-panes-shim')
     const launch = this.claudeAgentTeams.createLaunchEnv({
       leaderHandle: args.handle,
       baseEnv,
       shimDir,
+      mode: mode === 'off' || mode === 'in-process' ? 'native-panes-shim' : mode,
       shimBin
     })
     const env = auth ? { ...auth.envPatch, ...launch.env } : launch.env
-    return { env }
+    return {
+      env,
+      envToDelete:
+        launch.env.ORCA_AGENT_TEAMS_PROTOCOL === 'it2' ? ['TMUX', 'TMUX_PANE'] : ['TERM_PROGRAM']
+    }
   }
 
   // Why: a leader handle that never binds to a PTY (lost pane race) has no exit

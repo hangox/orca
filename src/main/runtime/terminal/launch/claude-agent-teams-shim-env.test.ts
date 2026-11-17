@@ -4,8 +4,12 @@ import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { buildRuntimeAgentTeamsLaunchPlan } from './agent-teams-launch-plan'
 
-import { ensureClaudeAgentTeamsShimDir } from './claude-agent-teams-shim-env'
+import {
+  buildClaudeAgentTeamsLaunchPlan,
+  ensureClaudeAgentTeamsShimDir
+} from './claude-agent-teams-shim-env'
 
 const roots: string[] = []
 
@@ -52,6 +56,56 @@ describe('claude agent teams shim env', () => {
 
       expect(qualified.status).toBe(0)
       expect(qualified.stdout.trim()).toBe('ran agent-teams-tmux list-panes')
+
+      const it2 = spawnSync(join(root, 'it2'), ['session', 'list'], {
+        cwd,
+        env: { PATH: `.:${process.env.PATH ?? ''}`, ORCA_AGENT_TEAMS_SHIM_BIN: cli },
+        encoding: 'utf8'
+      })
+      expect(it2.status).toBe(0)
+      expect(it2.stdout.trim()).toBe('ran agent-teams-it2 session list')
     }
   )
+
+  it.skipIf(process.platform === 'win32')('为普通命令注入 it2 环境但不改写命令', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'orca-agent-teams-home-'))
+    roots.push(root)
+    vi.stubEnv('HOME', root)
+    const command = 'printf "普通启动命令\\n"'
+    const plan = await buildClaudeAgentTeamsLaunchPlan({
+      command,
+      mode: 'it2',
+      baseEnv: { ORCA_AGENT_TEAMS_SHIM_BIN: process.execPath },
+      createTeamEnv: (_shimDir, _shimBin, mode) => ({ ORCA_AGENT_TEAMS_PROTOCOL: mode })
+    })
+    expect(plan?.command).toBe(command)
+    expect(plan?.env.ORCA_AGENT_TEAMS_PROTOCOL).toBe('it2')
+    expect(plan?.envToDelete).toEqual(['TMUX', 'TMUX_PANE'])
+  })
+
+  it('已有团队的 runtime 启动保留原身份', async () => {
+    const createTeamEnv = vi.fn()
+    const result = await buildRuntimeAgentTeamsLaunchPlan({
+      launchConfig: undefined,
+      command: 'claude --teammate-mode auto',
+      claudeAgentTeamsMode: 'it2',
+      baseEnv: { ORCA_AGENT_TEAMS_TEAM_ID: 'team-original' },
+      adoptedBeforeLaunch: false,
+      preserveExistingTeam: true,
+      createTeamEnv
+    })
+    expect(result.plan).toBeUndefined()
+    expect(createTeamEnv).not.toHaveBeenCalled()
+  })
+
+  it('fails explicitly when the selected it2 backend has no absolute shim', async () => {
+    await expect(
+      buildClaudeAgentTeamsLaunchPlan({
+        command: 'claude',
+        mode: 'it2',
+        baseEnv: { PATH: '/path-that-does-not-exist' },
+        createTeamEnv: vi.fn()
+      })
+    ).rejects.toThrow('claude_agent_teams_it2_shim_unavailable')
+  })
 })

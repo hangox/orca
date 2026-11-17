@@ -96,8 +96,12 @@ export function useAppThemePaint(): AppThemePaintState {
     // Why theme too: contrast is checked against the built-ins of the current mode.
     if (ready && theme) {
       appPainted.current = applyPluginAppTheme(appTheme)
+      document.documentElement.toggleAttribute(
+        'data-iterm-rounded-theme',
+        pluginTheme?.id === 'plugin:local.iterm-wallpaper/dark'
+      )
     }
-  }, [appTheme, ready, theme, dark])
+  }, [appTheme, pluginTheme, ready, theme, dark])
 
   return {
     theme,

@@ -122,12 +122,16 @@ export function inferCapturedClaudeAgentTeamsMode(
   const capturedArgs = launchConfig?.agentArgs?.trim() ?? ''
   const capturedLaunch = `${capturedCommand} ${capturedArgs}`.trim()
   if (/(^|\s)--teammate-mode(?:=|\s+)auto(?:\s|$)/.test(capturedLaunch)) {
-    return 'native-panes-shim'
+    return currentMode === 'it2' ? 'it2' : 'native-panes-shim'
   }
   if (/(^|\s)--teammate-mode(?:=|\s+)in-process(?:\s|$)/.test(capturedLaunch)) {
     return 'in-process'
   }
-  if (launchConfig && /(^|\s)--resume(?:\s|=|$)/.test(command?.trim() ?? '')) {
+  if (
+    currentMode !== 'it2' &&
+    launchConfig &&
+    /(^|\s)--resume(?:\s|=|$)/.test(command?.trim() ?? '')
+  ) {
     return 'off'
   }
   return currentMode

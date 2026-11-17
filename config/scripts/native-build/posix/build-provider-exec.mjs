@@ -149,7 +149,11 @@ export function buildProviderExec({
   rmSync(stamp, { force: true })
   rmSync(output, { force: true })
   function invoke(command, args) {
-    const result = run(command, args, { stdio: 'inherit', cwd: root })
+    const env =
+      command === 'xcrun'
+        ? { ...process.env, ARCHFLAGS: '', SDKROOT: process.env.SDKROOT || 'macosx' }
+        : process.env
+    const result = run(command, args, { stdio: 'inherit', cwd: root, env })
     if (result.error) {
       throw new Error(`Unable to run ${command} to build the provider exec helper.`, {
         cause: result.error
@@ -162,6 +166,8 @@ export function buildProviderExec({
   const source = join(root, SOURCE)
   if (toolchain === 'xcrun-clang') {
     invoke('xcrun', [
+      '--sdk',
+      'macosx',
       'clang',
       '-arch',
       parsed.arch === 'x64' ? 'x86_64' : 'arm64',

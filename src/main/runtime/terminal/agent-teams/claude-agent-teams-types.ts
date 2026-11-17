@@ -14,6 +14,7 @@ export type AgentTeamsTmuxCompatRequest = {
   envPane: string
   cwd?: string
   argv: string[]
+  protocol?: 'tmux' | 'it2'
 }
 
 export type AgentTeamsTmuxCompatResponse = {
@@ -36,6 +37,7 @@ export type AgentTeamsTerminalApi = {
     opts: {
       direction?: 'horizontal' | 'vertical'
       command?: string
+      cwd?: string
       env?: Record<string, string>
       envToDelete?: string[]
       activate?: boolean
@@ -56,6 +58,8 @@ export type TeamPane = {
   fakePaneId: string
   handle: string
   index: number
+  state: 'starting' | 'ready' | 'closed'
+  pendingCommands: string[]
   // Remember the split slot so placeholder respawn can preserve its fake pane id.
   splitFromPane?: string
   splitDirection?: 'horizontal' | 'vertical'
@@ -64,6 +68,7 @@ export type TeamPane = {
 
 export type AgentTeam = {
   teamId: string
+  protocol: 'tmux' | 'it2'
   token: string
   leaderPane: string
   leaderHandle: string
@@ -72,6 +77,7 @@ export type AgentTeam = {
   tmuxValue: string
   baseEnv: Record<string, string>
   panes: Map<string, TeamPane>
+  handleToPane: Map<string, string>
   paneOrder: string[]
   nextPaneNumber: number
   mainVertical: {

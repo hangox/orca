@@ -16,6 +16,8 @@ import { afterAll, describe, expect, it } from 'vitest'
 import { resolveFishBinary } from '../testing/fish-binary-requirement'
 import { stageStartupCommand } from './startup-command-staging'
 import { buildStartupCommandSubmission } from './startup-command-submission'
+import { ClaudeAgentTeamsService } from '../../../main/runtime/terminal/agent-teams/claude-agent-teams-service'
+import type { AgentTeamsTerminalApi } from '../../../main/runtime/terminal/agent-teams/claude-agent-teams-types'
 import { quoteStartupArg } from '../../agent-launch/startup/tui-agent-startup-shell'
 
 type LiveShell = { name: string; path: string; args: string[] }
@@ -144,6 +146,67 @@ const SHELLS = discoverShells()
 const describeShells = SHELLS.length > 0 ? describe : describe.skip
 
 describeShells('a staged launch line in a real shell', () => {
+  it.skipIf(process.platform === 'win32' || !existsSync('/bin/zsh'))(
+    'it2 session run 在真实 PTY 完整提交长 JSON 命令',
+    async () => {
+      const proc = pty.spawn('/bin/zsh', ['-f', '-i'], {
+        name: 'xterm-256color',
+        cols: 120,
+        rows: 30,
+        cwd: SANDBOX,
+        env: { PATH: '/usr/bin:/bin', HOME: SANDBOX, TERM: 'xterm-256color' }
+      })
+      let output = ''
+      const onData = proc.onData((data) => {
+        output += data
+      })
+      const service = new ClaudeAgentTeamsService()
+      const launch = service.createLaunchEnv({
+        leaderHandle: 'leader',
+        baseEnv: {},
+        shimDir: '/shim',
+        shimBin: '/bin/orca',
+        mode: 'it2'
+      })
+      const json = JSON.stringify({ modelPicker: { options: [`模型-${'x'.repeat(5000)}`] } })
+      const expected = `RESULT:${json}:END`
+      const command = `printf '%s\\n' ${quoteStartupArg(expected, 'posix')}`
+      const api = {
+        sendTerminal: async (_handle: string, action: { text?: string; enter?: boolean }) => {
+          proc.write(`${action.text ?? ''}${action.enter ? '\r' : ''}`)
+          return {
+            handle: 'leader',
+            accepted: true,
+            bytesWritten: Buffer.byteLength(action.text ?? '')
+          }
+        }
+      } as unknown as AgentTeamsTerminalApi
+      try {
+        const result = await service.handleTmuxCompat(
+          {
+            teamId: launch.teamId,
+            token: launch.token,
+            envPane: '%1',
+            protocol: 'it2',
+            argv: ['session', 'run', command]
+          },
+          api
+        )
+        expect(result.ok).toBe(true)
+        const deadline = Date.now() + 10_000
+        while (!output.includes(expected) && Date.now() < deadline) {
+          await new Promise((resolve) => {
+            setTimeout(resolve, 50)
+          })
+        }
+        expect(output).toContain(expected)
+      } finally {
+        onData.dispose()
+        proc.kill()
+      }
+    },
+    20_000
+  )
   for (const shell of SHELLS) {
     it.each(PROMPTS)(
       `reaches the agent byte for byte, as its own job, in ${shell.name}: %s`,

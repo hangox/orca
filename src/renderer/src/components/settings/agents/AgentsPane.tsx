@@ -20,6 +20,7 @@ import {
 } from './behavior/agent-status-hooks-copy'
 import { SettingsSwitchRow } from '../form-controls/SettingsFormControls'
 import { isPairedWebClientWindow } from '@/app-shell/chrome/desktop-window-chrome'
+import { ClaudeAgentTeamsModeSetting } from './ClaudeAgentTeamsModeSetting'
 import { AgentLaunchSettingsSection } from './launch/AgentLaunchSettingsSection'
 import {
   AgentPermissionsSetting,
@@ -56,6 +57,15 @@ export function AgentsPane({
   const t = useTranslate()
   return (
     <div className="space-y-8">
+      <SettingsGroup
+        title={t('components.settings.agents.agentTeams.title', 'Claude Agent Teams')}
+        description={t(
+          'components.settings.agents.agentTeams.description',
+          'Choose how Claude Agent Teams creates teammate terminals. The iTerm2 backend is available on macOS when the Orca it2 shim is installed.'
+        )}
+      >
+        <ClaudeAgentTeamsModeSetting settings={settings} updateSettings={updateSettings} />
+      </SettingsGroup>
       <AgentLaunchSettingsSection
         settings={settings}
         updateSettings={updateSettings}

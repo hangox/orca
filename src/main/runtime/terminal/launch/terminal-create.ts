@@ -1,3 +1,4 @@
+/* oxlint-disable max-lines */
 import type { TerminalWorkspaceCreationEvidence } from './terminal-workspace-scope'
 import {
   recordTerminalLaunchMetadata,
@@ -97,14 +98,26 @@ export abstract class OrcaRuntimeWithCreateTerminal extends OrcaRuntimeWithTermi
       let result!: Awaited<ReturnType<NonNullable<RuntimePtyController['spawn']>>>
       const spawnFresh = async (operation: PaneSpawnOperation) => {
         const baseEnv = withAgentLaunchToken(launchOpts.env, launchToken)
+        const teamEnv = { ...launchOpts.launchConfig?.agentEnv, ...baseEnv }
+        const preserveExistingTeam = this.claudeAgentTeams.isLiveTeam(
+          teamEnv,
+          this.handleByPtyId,
+          this.ptysById
+        )
         const agentTeams = await teamAllocation
           .prepare(
             {
               launchConfig: launchOpts.launchConfig,
               command: launchOpts.command,
               claudeAgentTeamsSourceCommand: launchOpts.claudeAgentTeamsSourceCommand,
-              claudeAgentTeamsMode: this.store?.getSettings?.().claudeAgentTeamsMode,
+              claudeAgentTeamsMode:
+                !preserveExistingTeam &&
+                teamEnv.ORCA_AGENT_TEAMS_TEAM_ID &&
+                teamEnv.ORCA_AGENT_TEAMS_PROTOCOL === 'it2'
+                  ? 'it2'
+                  : this.store?.getSettings?.().claudeAgentTeamsMode,
               baseEnv: { ...process.env, ...baseEnv },
+              preserveExistingTeam,
               adoptedBeforeLaunch: null
             },
             preAllocatedHandle
@@ -149,7 +162,10 @@ export abstract class OrcaRuntimeWithCreateTerminal extends OrcaRuntimeWithTermi
             env,
             envToDelete: mergeTerminalEnvDeletionKeys(
               launchOpts.envToDelete,
-              agentTeamsPlan?.envToDelete
+              agentTeamsPlan?.envToDelete ??
+                (preserveExistingTeam && teamEnv?.ORCA_AGENT_TEAMS_PROTOCOL === 'it2'
+                  ? ['TMUX', 'TMUX_PANE']
+                  : undefined)
             ),
             resumeProviderSession: launchOpts.resumeProviderSession,
             ...(launchOpts.resumeOrigin ? { resumeOrigin: launchOpts.resumeOrigin } : {}),

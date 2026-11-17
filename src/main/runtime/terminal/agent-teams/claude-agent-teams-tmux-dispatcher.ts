@@ -125,6 +125,8 @@ export class ClaudeAgentTeamsTmuxDispatcher {
       fakePaneId,
       handle: split.handle,
       index: team.paneOrder.length,
+      state: 'ready',
+      pendingCommands: [],
       splitFromPane: splitTarget.pane.fakePaneId,
       splitDirection: splitTarget.direction
     }
