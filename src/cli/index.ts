@@ -260,7 +260,9 @@ function resolveAgentTeamsEnvPane(protocol: 'tmux' | 'it2'): string | undefined 
 
 async function runAgentTeamsShim(protocol: 'tmux' | 'it2', argv: string[]): Promise<void> {
   try {
-    const client = new (await loadRuntimeClientClass())(undefined, 10_000)
+    const timeoutMs =
+      protocol === 'it2' && argv[0] === 'session' && argv[1] === 'run' ? 40_000 : 10_000
+    const client = new (await loadRuntimeClientClass())(undefined, timeoutMs)
     const response = await client.call<{
       tmux: { stdout: string; stderr: string; exitCode: number }
     }>(
@@ -273,7 +275,7 @@ async function runAgentTeamsShim(protocol: 'tmux' | 'it2', argv: string[]): Prom
         argv,
         protocol
       },
-      { timeoutMs: 10_000 }
+      { timeoutMs }
     )
     process.stdout.write(response.result.tmux.stdout)
     process.stderr.write(response.result.tmux.stderr)

@@ -171,8 +171,16 @@ describeShells('a staged launch line in a real shell', () => {
       const json = JSON.stringify({ modelPicker: { options: [`模型-${'x'.repeat(5000)}`] } })
       const expected = `RESULT:${SANDBOX}:${json}:END`
       const command = `export ORCA_LONG_VALUE=${quoteStartupArg(json, 'posix')}`
+      let releaseReady!: () => void
+      const ready = new Promise<void>((resolve) => {
+        releaseReady = resolve
+      })
       const api = {
-        showTerminal: async () => ({ executionHostId: 'local' }),
+        splitTerminal: async () => ({ handle: 'teammate', tabId: 'tab-1', paneRuntimeId: 1 }),
+        showTerminal: async () => {
+          await ready
+          return { executionHostId: 'local', connected: true, writable: true }
+        },
         sendTerminal: async (_handle: string, action: { text?: string; enter?: boolean }) => {
           proc.write(`${action.text ?? ''}${action.enter ? '\r' : ''}`)
           return {
@@ -183,24 +191,36 @@ describeShells('a staged launch line in a real shell', () => {
         }
       } as unknown as AgentTeamsTerminalApi
       try {
-        const setup = await service.handleTmuxCompat(
+        const split = await service.handleTmuxCompat(
           {
             teamId: launch.teamId,
             token: launch.token,
             envPane: '%1',
             protocol: 'it2',
-            argv: ['session', 'run', 'export ORCA_TEST_ROUND="$HOME"']
+            argv: ['session', 'split']
           },
           api
         )
-        expect(setup.ok).toBe(true)
+        expect(split.ok).toBe(true)
+        const setup = service.handleTmuxCompat(
+          {
+            teamId: launch.teamId,
+            token: launch.token,
+            envPane: '%1',
+            protocol: 'it2',
+            argv: ['session', 'run', '-s', '%2', 'export ORCA_TEST_ROUND="$HOME"']
+          },
+          api
+        )
+        releaseReady()
+        expect((await setup).ok).toBe(true)
         const result = await service.handleTmuxCompat(
           {
             teamId: launch.teamId,
             token: launch.token,
             envPane: '%1',
             protocol: 'it2',
-            argv: ['session', 'run', command]
+            argv: ['session', 'run', '-s', '%2', command]
           },
           api
         )
@@ -214,6 +234,8 @@ describeShells('a staged launch line in a real shell', () => {
             argv: [
               'session',
               'run',
+              '-s',
+              '%2',
               `printf 'RESULT:%s:%s:END\\n' "$ORCA_TEST_ROUND" "$ORCA_LONG_VALUE"`
             ]
           },

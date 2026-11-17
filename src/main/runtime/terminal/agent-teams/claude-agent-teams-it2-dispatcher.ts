@@ -1,3 +1,4 @@
+import { parseIt2Options as parseOptions } from './claude-agent-teams-it2-options'
 import type { AgentTeamsTerminalApi, AgentTeam, TeamPane } from './claude-agent-teams-types'
 import {
   discardStagedStartupCommand,
@@ -5,7 +6,14 @@ import {
 } from '../../../../shared/shell/launch/startup-command-staging'
 import { describeUnconfirmedAgentStop } from '../../../../shared/terminal/pty/lifecycle/pty-liveness-verdict'
 
+type PendingIt2Command = {
+  command: string
+  resolve: () => void
+  reject: (error: Error) => void
+}
+
 export class ClaudeAgentTeamsIt2Dispatcher {
+  private readonly pendingCommands = new WeakMap<TeamPane, PendingIt2Command[]>()
   async dispatch(
     team: AgentTeam,
     argv: string[],
@@ -95,8 +103,12 @@ export class ClaudeAgentTeamsIt2Dispatcher {
       parsed.values.get('-s') ?? parsed.values.get('--session') ?? envPane
     )
     if (target.state === 'starting') {
-      target.pendingCommands.push(command)
-      return 'OK (queued, waiting for ready)\n'
+      await new Promise<void>((resolve, reject) => {
+        const pending = this.pendingCommands.get(target) ?? []
+        pending.push({ command, resolve, reject })
+        this.pendingCommands.set(target, pending)
+      })
+      return ''
     }
     if (target.state === 'closed') {
       throw new Error(`session closed: ${target.fakePaneId}`)
@@ -161,19 +173,30 @@ export class ClaudeAgentTeamsIt2Dispatcher {
       }
       try {
         const shown = await api.showTerminal(pane.handle)
+        if (team.panes.get(paneId) !== pane || team.panes.get(paneId)?.state === 'closed') {
+          return
+        }
         if (shown.connected && shown.writable) {
-          pane.state = 'ready'
-          const pending = pane.pendingCommands.splice(0)
-          for (const command of pending) {
+          const pending = this.pendingCommands.get(pane) ?? []
+          while (pending.length > 0) {
+            const entry = pending.shift()!
             try {
-              await this.sendCommand(pane, command, api)
-            } catch {
+              await this.sendCommand(pane, entry.command, api)
+              entry.resolve()
+              if (team.panes.get(paneId) !== pane) {
+                return
+              }
+            } catch (error) {
+              const failure = error instanceof Error ? error : new Error(String(error))
+              entry.reject(failure)
+              this.rejectPending(pane, failure)
               pane.state = 'closed'
-              pane.pendingCommands.length = 0
               await this.retirePane(team, pane, api)
               return
             }
           }
+          pane.state = 'ready'
+          this.pendingCommands.delete(pane)
           return
         }
       } catch {
@@ -186,7 +209,7 @@ export class ClaudeAgentTeamsIt2Dispatcher {
       return
     }
     pane.state = 'closed'
-    pane.pendingCommands.length = 0
+    this.rejectPending(pane, new Error(`session not ready: ${paneId}`))
     await this.retirePane(team, pane, api)
   }
 
@@ -209,7 +232,16 @@ export class ClaudeAgentTeamsIt2Dispatcher {
     return true
   }
 
+  private rejectPending(pane: TeamPane, error: Error): void {
+    for (const pending of this.pendingCommands.get(pane)?.splice(0) ?? []) {
+      pending.reject(error)
+    }
+    this.pendingCommands.delete(pane)
+  }
+
   private removePane(team: AgentTeam, pane: TeamPane): void {
+    pane.state = 'closed'
+    this.rejectPending(pane, new Error(`session closed: ${pane.fakePaneId}`))
     team.panes.delete(pane.fakePaneId)
     team.handleToPane.delete(pane.handle)
     team.paneOrder = team.paneOrder.filter((id) => id !== pane.fakePaneId)
@@ -258,45 +290,4 @@ export class ClaudeAgentTeamsIt2Dispatcher {
       throw new Error(`usage: it2 session ${command}`)
     }
   }
-}
-
-type ParsedOptions = {
-  flags: Set<string>
-  values: Map<string, string>
-  positional: string[]
-}
-
-function parseOptions(
-  args: string[],
-  valueFlags: Set<string>,
-  boolFlags: Set<string>
-): ParsedOptions {
-  const flags = new Set<string>()
-  const values = new Map<string, string>()
-  const positional: string[] = []
-  let options = true
-  for (let i = 0; i < args.length; i += 1) {
-    const arg = args[i] ?? ''
-    if (options && arg === '--') {
-      options = false
-      continue
-    }
-    if (options && boolFlags.has(arg)) {
-      flags.add(arg)
-      continue
-    }
-    if (options && valueFlags.has(arg)) {
-      const value = args[++i]
-      if (!value || value.startsWith('-')) {
-        throw new Error(`missing value for ${arg}`)
-      }
-      values.set(arg, value)
-      continue
-    }
-    if (options && arg.startsWith('-')) {
-      throw new Error(`unsupported option: ${arg}`)
-    }
-    positional.push(arg)
-  }
-  return { flags, values, positional }
 }

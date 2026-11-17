@@ -226,10 +226,104 @@ describe('ClaudeAgentTeamsService', () => {
       ptyKilled: false,
       ptyStopVerdict: 'live'
     })
-    await request(['session', 'run', '-s', '%2', 'echo queued'])
+    await expect(request(['session', 'run', '-s', '%2', 'echo queued'])).resolves.toMatchObject({
+      ok: false,
+      stderr: expect.stringContaining('write failed')
+    })
     await vi.waitFor(() => expect(api.closeTerminal).toHaveBeenCalledWith('teammate-1'))
     await expect(request(['session', 'list'])).resolves.toMatchObject({ stdout: '%1\n%2\n' })
   })
+
+  it('starting pane 的 run 等待实际终端写入后才成功', async () => {
+    const { service, teamId, token, leaderPane, api } = createServiceWithLeader('it2')
+    const request = (argv: string[]) =>
+      service.handleTmuxCompat({ teamId, token, envPane: leaderPane, argv, protocol: 'it2' }, api)
+    const original = await api.showTerminal('teammate-1')
+    let releaseReady!: () => void
+    const ready = new Promise<void>((resolve) => {
+      releaseReady = resolve
+    })
+    vi.mocked(api.showTerminal).mockImplementation(async () => {
+      await ready
+      return { ...original, executionHostId: 'local' }
+    })
+    let releaseWrite!: () => void
+    const written = new Promise<void>((resolve) => {
+      releaseWrite = resolve
+    })
+    vi.mocked(api.sendTerminal).mockImplementation(async (handle) => {
+      await written
+      return { handle, accepted: true, bytesWritten: 3 }
+    })
+    await request(['session', 'split', '-s', leaderPane])
+    let settled = false
+    const result = request(['session', 'run', '-s', '%2', 'echo test'])
+    void result.then(() => {
+      settled = true
+    })
+    releaseReady()
+    await vi.waitFor(() => expect(api.sendTerminal).toHaveBeenCalled())
+    expect(settled).toBe(false)
+    releaseWrite()
+    await expect(result).resolves.toMatchObject({ ok: true, exitCode: 0 })
+  })
+
+  it('starting pane 在等待期间关闭时拒绝已排队的 run', async () => {
+    const { service, teamId, token, leaderPane, api } = createServiceWithLeader('it2')
+    const request = (argv: string[]) =>
+      service.handleTmuxCompat({ teamId, token, envPane: leaderPane, argv, protocol: 'it2' }, api)
+    const original = await api.showTerminal('teammate-1')
+    let release!: () => void
+    const ready = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    vi.mocked(api.showTerminal).mockImplementation(async () => {
+      await ready
+      return original
+    })
+    await request(['session', 'split', '-s', leaderPane])
+    const run = request(['session', 'run', '-s', '%2', 'echo test'])
+    await expect(request(['session', 'close', '-s', '%2'])).resolves.toMatchObject({ ok: true })
+    await expect(run).resolves.toMatchObject({
+      ok: false,
+      stderr: expect.stringContaining('session closed')
+    })
+    release()
+    expect(api.sendTerminal).not.toHaveBeenCalled()
+  })
+
+  it.each(['ssh:remote', undefined] as const)(
+    'starting pane 的长命令遇到 %s 主机时返回真实错误',
+    async (executionHostId) => {
+      const { service, teamId, token, leaderPane, api } = createServiceWithLeader('it2')
+      const request = (argv: string[]) =>
+        service.handleTmuxCompat({ teamId, token, envPane: leaderPane, argv, protocol: 'it2' }, api)
+      const original = await api.showTerminal('teammate-1')
+      let release!: () => void
+      const ready = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      vi.mocked(api.showTerminal).mockImplementation(async () => {
+        await ready
+        return { ...original, executionHostId }
+      })
+      await request(['session', 'split', '-s', leaderPane])
+      let settled = false
+      const result = request(['session', 'run', '-s', '%2', `printf '%s' '${'x'.repeat(2000)}'`])
+      void result.then(() => {
+        settled = true
+      })
+      await Promise.resolve()
+      expect(settled).toBe(false)
+      release()
+      await expect(result).resolves.toMatchObject({
+        ok: false,
+        exitCode: 1,
+        stderr: expect.stringContaining('无法确认目标终端可访问本机暂存命令')
+      })
+      expect(api.sendTerminal).not.toHaveBeenCalled()
+    }
+  )
 
   it('拒绝向不可确认本地主机的 pane 发送暂存长命令', async () => {
     const { service, teamId, token, leaderPane, api } = createServiceWithLeader('it2')
