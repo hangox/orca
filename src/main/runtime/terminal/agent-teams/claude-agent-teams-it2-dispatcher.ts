@@ -220,11 +220,17 @@ export class ClaudeAgentTeamsIt2Dispatcher {
     command: string,
     api: AgentTeamsTerminalApi
   ): Promise<void> {
-    const staging = stageStartupCommand({ command, shellPath: undefined, orcaBuiltLine: true })
+    const staging = stageStartupCommand({ command, shellPath: 'sh' })
     if (staging.failure) {
       throw new Error(`无法暂存 teammate 启动命令: ${staging.failure}`)
     }
     try {
+      if (staging.scriptPath) {
+        const terminal = await api.showTerminal(pane.handle)
+        if (terminal.executionHostId !== 'local') {
+          throw new Error('无法确认目标终端可访问本机暂存命令')
+        }
+      }
       const result = await api.sendTerminal(
         pane.handle,
         { text: staging.command, enter: true },

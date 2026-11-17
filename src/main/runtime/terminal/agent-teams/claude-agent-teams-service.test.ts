@@ -231,6 +231,23 @@ describe('ClaudeAgentTeamsService', () => {
     await expect(request(['session', 'list'])).resolves.toMatchObject({ stdout: '%1\n%2\n' })
   })
 
+  it('拒绝向不可确认本地主机的 pane 发送暂存长命令', async () => {
+    const { service, teamId, token, leaderPane, api } = createServiceWithLeader('it2')
+    const result = await service.handleTmuxCompat(
+      {
+        teamId,
+        token,
+        envPane: leaderPane,
+        protocol: 'it2',
+        argv: ['session', 'run', `printf '%s' '${'x'.repeat(2000)}'`]
+      },
+      api
+    )
+    expect(result.ok).toBe(false)
+    expect(result.stderr).toContain('无法确认目标终端可访问本机暂存命令')
+    expect(api.sendTerminal).not.toHaveBeenCalled()
+  })
+
   it('routes the it2 session contract through the same team-scoped pane registry', async () => {
     const { service, teamId, token, leaderPane, api, splitCalls } = createServiceWithLeader('it2')
     const request = (argv: string[], envPane = leaderPane, requestToken = token) =>

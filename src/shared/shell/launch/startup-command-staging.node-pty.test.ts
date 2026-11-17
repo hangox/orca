@@ -169,9 +169,10 @@ describeShells('a staged launch line in a real shell', () => {
         mode: 'it2'
       })
       const json = JSON.stringify({ modelPicker: { options: [`模型-${'x'.repeat(5000)}`] } })
-      const expected = `RESULT:${json}:END`
-      const command = `printf '%s\\n' ${quoteStartupArg(expected, 'posix')}`
+      const expected = `RESULT:${SANDBOX}:${json}:END`
+      const command = `export ORCA_LONG_VALUE=${quoteStartupArg(json, 'posix')}`
       const api = {
+        showTerminal: async () => ({ executionHostId: 'local' }),
         sendTerminal: async (_handle: string, action: { text?: string; enter?: boolean }) => {
           proc.write(`${action.text ?? ''}${action.enter ? '\r' : ''}`)
           return {
@@ -182,6 +183,17 @@ describeShells('a staged launch line in a real shell', () => {
         }
       } as unknown as AgentTeamsTerminalApi
       try {
+        const setup = await service.handleTmuxCompat(
+          {
+            teamId: launch.teamId,
+            token: launch.token,
+            envPane: '%1',
+            protocol: 'it2',
+            argv: ['session', 'run', 'export ORCA_TEST_ROUND="$HOME"']
+          },
+          api
+        )
+        expect(setup.ok).toBe(true)
         const result = await service.handleTmuxCompat(
           {
             teamId: launch.teamId,
@@ -193,6 +205,21 @@ describeShells('a staged launch line in a real shell', () => {
           api
         )
         expect(result.ok).toBe(true)
+        const check = await service.handleTmuxCompat(
+          {
+            teamId: launch.teamId,
+            token: launch.token,
+            envPane: '%1',
+            protocol: 'it2',
+            argv: [
+              'session',
+              'run',
+              `printf 'RESULT:%s:%s:END\\n' "$ORCA_TEST_ROUND" "$ORCA_LONG_VALUE"`
+            ]
+          },
+          api
+        )
+        expect(check.ok).toBe(true)
         const deadline = Date.now() + 10_000
         while (!output.includes(expected) && Date.now() < deadline) {
           await new Promise((resolve) => {
