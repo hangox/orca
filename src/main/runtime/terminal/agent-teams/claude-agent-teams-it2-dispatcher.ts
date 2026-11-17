@@ -105,7 +105,23 @@ export class ClaudeAgentTeamsIt2Dispatcher {
     if (target.state === 'starting') {
       await new Promise<void>((resolve, reject) => {
         const pending = this.pendingCommands.get(target) ?? []
-        pending.push({ command, resolve, reject })
+        const timer = setTimeout(() => {
+          target.state = 'closed'
+          this.rejectPending(target, new Error(`session send timed out: ${target.fakePaneId}`))
+          void this.retirePane(team, target, api)
+        }, 30_000)
+        timer.unref?.()
+        pending.push({
+          command,
+          resolve: () => {
+            clearTimeout(timer)
+            resolve()
+          },
+          reject: (error) => {
+            clearTimeout(timer)
+            reject(error)
+          }
+        })
         this.pendingCommands.set(target, pending)
       })
       return ''
@@ -179,16 +195,19 @@ export class ClaudeAgentTeamsIt2Dispatcher {
         if (shown.connected && shown.writable) {
           const pending = this.pendingCommands.get(pane) ?? []
           while (pending.length > 0) {
-            const entry = pending.shift()!
+            const entry = pending[0]!
             try {
               await this.sendCommand(pane, entry.command, api)
-              entry.resolve()
-              if (team.panes.get(paneId) !== pane) {
+              if (team.panes.get(paneId) !== pane || team.panes.get(paneId)?.state === 'closed') {
                 return
               }
+              pending.shift()
+              entry.resolve()
             } catch (error) {
+              if (team.panes.get(paneId) !== pane || team.panes.get(paneId)?.state === 'closed') {
+                return
+              }
               const failure = error instanceof Error ? error : new Error(String(error))
-              entry.reject(failure)
               this.rejectPending(pane, failure)
               pane.state = 'closed'
               await this.retirePane(team, pane, api)

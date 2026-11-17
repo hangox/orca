@@ -292,6 +292,90 @@ describe('ClaudeAgentTeamsService', () => {
     expect(api.sendTerminal).not.toHaveBeenCalled()
   })
 
+  it.each(['resolve', 'reject'] as const)(
+    '发送挂起时关闭 pane 后，迟到的 %s 不得返回成功',
+    async (completion) => {
+      const { service, teamId, token, leaderPane, api } = createServiceWithLeader('it2')
+      const request = (argv: string[]) =>
+        service.handleTmuxCompat({ teamId, token, envPane: leaderPane, argv, protocol: 'it2' }, api)
+      const original = await api.showTerminal('teammate-1')
+      let releaseReady!: () => void
+      const ready = new Promise<void>((resolve) => {
+        releaseReady = resolve
+      })
+      vi.mocked(api.showTerminal).mockImplementation(async () => {
+        await ready
+        return original
+      })
+      let finishWrite!: () => void
+      const write = new Promise<void>((resolve) => {
+        finishWrite = resolve
+      })
+      vi.mocked(api.sendTerminal).mockImplementation(async (handle) => {
+        await write
+        if (completion === 'reject') {
+          throw new Error('late write failure')
+        }
+        return { handle, accepted: true, bytesWritten: 1 }
+      })
+      await request(['session', 'split', '-s', leaderPane])
+      const first = request(['session', 'run', '-s', '%2', 'echo first'])
+      const second = request(['session', 'run', '-s', '%2', 'echo second'])
+      releaseReady()
+      await vi.waitFor(() => expect(api.sendTerminal).toHaveBeenCalledTimes(1))
+      await expect(request(['session', 'close', '-s', '%2'])).resolves.toMatchObject({ ok: true })
+      await expect(first).resolves.toMatchObject({
+        ok: false,
+        stderr: expect.stringContaining('session closed')
+      })
+      await expect(second).resolves.toMatchObject({
+        ok: false,
+        stderr: expect.stringContaining('session closed')
+      })
+      finishWrite()
+      await Promise.resolve()
+      expect(api.sendTerminal).toHaveBeenCalledTimes(1)
+    }
+  )
+
+  it('starting pane 的 in-flight 写入超时后明确失败', async () => {
+    vi.useFakeTimers()
+    try {
+      const { service, teamId, token, leaderPane, api } = createServiceWithLeader('it2')
+      const request = (argv: string[]) =>
+        service.handleTmuxCompat({ teamId, token, envPane: leaderPane, argv, protocol: 'it2' }, api)
+      const original = await api.showTerminal('teammate-1')
+      let releaseReady!: () => void
+      const ready = new Promise<void>((resolve) => {
+        releaseReady = resolve
+      })
+      vi.mocked(api.showTerminal).mockImplementation(async () => {
+        await ready
+        return original
+      })
+      let notifyStarted!: () => void
+      const started = new Promise<void>((resolve) => {
+        notifyStarted = resolve
+      })
+      vi.mocked(api.sendTerminal).mockImplementation(async () => {
+        notifyStarted()
+        return await new Promise<never>(() => {})
+      })
+      await request(['session', 'split', '-s', leaderPane])
+      const run = request(['session', 'run', '-s', '%2', 'echo test'])
+      releaseReady()
+      await started
+      await vi.advanceTimersByTimeAsync(30_000)
+      await expect(run).resolves.toMatchObject({
+        ok: false,
+        stderr: expect.stringContaining('timed out')
+      })
+      expect(api.closeTerminal).toHaveBeenCalledWith('teammate-1')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it.each(['ssh:remote', undefined] as const)(
     'starting pane 的长命令遇到 %s 主机时返回真实错误',
     async (executionHostId) => {
